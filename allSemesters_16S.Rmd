@@ -1,0 +1,236 @@
+---
+title: "Analysis of all semesters"
+author: "Niel"
+date: "June 9, 2016"
+output: html_document
+---
+
+```{r startup, echo=F, message=F, warning=F}
+deps <- c("rmarkdown","randomForest","plyr","vegan");
+for (dep in deps){
+  if (dep %in% installed.packages()[,"Package"] == FALSE){
+    install.packages(as.character(dep), quiet=TRUE);
+  }
+  library(dep, verbose=FALSE, character.only=TRUE)
+}
+
+pval <- function(p){
+  if(p < 0.001){p <- 'p<0.001'}
+  else{p <- sprintf('p=%.2f', p)}
+  return(p)
+}
+
+setwd('~/Desktop/MMP/')
+shared <- read.delim('Subsample3000_Win2015_Fall2015_Win2016.an.unique_list.shared', header=T, sep='\t')
+shared<-shared[,-ncol(shared)]
+shared[,4:ncol(shared)] <- shared[,4:ncol(shared)]/3000
+```
+
+
+```{r timelines, echo=F, warning=F, message=F}
+days <- c(0,1,3,5,7,7.5,10,10.5,11,13,15,17,18)
+Potato1 <- c(0,0,0,0,0,24,24,48,48,48,48,48,0)
+Himaize <- c(0,0,0,0,0,24,24,48,48,48,48,48,0)+0.7
+Inulin <- c(0,0,0,0,0,10,10,20,20,20,20,20,0)
+Arabino <- c(0,0,0,0,0,1.5,1.5,3,3,3,3,3,0)
+consumed <- cbind(Potato1,Himaize,Inulin,Arabino)
+
+par(mar=c(3,3,2,1), mgp=c(1.5,0.5,0))
+plot(0, type='n', xlim=c(0,22), ylim=c(0,50), xlab='Day', ylab='Starch consumed (g/day)')
+cols <- c('royalblue1','orange','green3','red')
+for(i in 1:ncol(consumed)){
+  points(days, consumed[,i], pch=c(NA,16,16,16,16,NA,NA,NA,16,16,16,16,NA), col=cols[i])
+  points(days, consumed[,i], type='l', col=cols[i])
+}
+#potato2
+rs2 <- c(0,0,0,0,0,24,24,48,48,48,48,48,0)-0.7
+days2 <- c(0,1,3,5,7,7.5,11,11.5,15,17,19,21,22)
+points(days2, rs2, pch=c(NA,16,16,16,16,NA,NA,NA,16,16,16,16,NA), col='purple')
+points(days2, rs2, type='l', col='purple')
+
+par(xpd=T)
+legend(1,50, legend=c(colnames(consumed),'Potato2'), col=c(cols,'purple'), lty=1, pch=16, box.lty=0)
+```
+
+
+```{r butyrate, echo=F, warning=F, message=F}
+butyrateData <- read.delim('allButyrate.txt', header=T, sep='\t', row.names=1)
+butMeds <- aggregate(butyrate~subject*status, data=butyrateData, FUN=median)
+butBef <- butMeds[butMeds$status=='before', c('subject','butyrate')]
+colnames(butBef) <- c('subject','butBefore')
+butDur <- butMeds[butMeds$status=='during', c('subject','butyrate')]
+colnames(butDur) <- c('subject','butDuring')
+
+but <- merge(butBef,butDur, by='subject')
+row.names(but) <- but$subject
+
+starch <- c('arabino', 'himaize', 'inulin', 'RS1', 'RS2', 'psyllium', 'both')
+
+pdf('butyrate_stripcharts.pdf', height=8, width=8)
+layout(c(1,2))
+par(mar=c(3,3.5,0.5,0.5), mgp=c(2,0.5,0))
+plot(-10, ylim=c(0,42), xlim=c(2,length(starch)*2+1), xaxt='n', ylab='butyrate (mmol/kg)', xlab='')
+legend(2, 30,legend=c('before','during'), pch=21, pt.bg=c('chartreuse4','royalblue1'),bty='n')
+starch <- c('arabino', 'himaize', 'inulin', 'RS1', 'RS2', 'psyllium', 'both')
+for(i in 1:length(starch)){
+  subjects <- unique(butyrateData$subject[butyrateData$substrate==starch[i]])
+  bef <- but[subjects, 'butBefore']
+  dur <- but[subjects, 'butDuring']
+  p <- wilcox.test(bef,dur, paired=T, alternative='less')$p.value
+  stripchart(bef, at=i*2, method='jitter', jitter=0.05, vertical=T, add=T, pch=21, bg='chartreuse4')
+  stripchart(dur, at=i*2+1, method='jitter', jitter=0.05, vertical=T, add=T, pch=21, bg='royalblue1')
+  segments(i*2, bef, i*2+1, dur)
+  text(i*2+0.5, 42, labels=sprintf('p=%.1g', p))
+}
+axis(1, at=seq(2.5,length(starch)*2+1,2), labels=starch)
+
+
+par(mar=c(3,3.5,0.5,0.5), mgp=c(2,0.5,0))
+plot(0, type='n', ylim=c(-15,30), xlim=c(0.5,length(starch)+0.5), xaxt='n', ylab='change in butyrate (mmol/kg)', xlab='')
+starch <- c('arabino', 'himaize', 'inulin', 'RS1', 'RS2', 'psyllium', 'both')
+for(i in 1:length(starch)){
+  subjects <- unique(butyrateData$subject[butyrateData$substrate==starch[i]])
+  bef <- but[subjects, 'butBefore']
+  dur <- but[subjects, 'butDuring']
+  stripchart(dur-bef, at=i, method='jitter', jitter=0.2, vertical=T, add=T, pch=21, bg='grey40')
+  abline(h=0, lty=3)
+}
+axis(1, at=seq(1,length(starch)), labels=starch)
+dev.off()
+```
+
+```{r butyrate_boxplots, echo=F, warning=F, message=F}
+pdf('butyrate_boxplots.pdf', height=8, width=8)
+layout(c(1,2))
+par(mar=c(3,3.5,0.5,0.5), mgp=c(2,0.5,0))
+plot(-10, ylim=c(0,42), xlim=c(2,length(starch)*2+1), xaxt='n', ylab='butyrate (mmol/kg)', xlab='Substrate')
+legend(2, 30,legend=c('before','during'), pch=21, pt.bg=c('chartreuse4','royalblue1'),bty='n')
+starch <- c('arabino', 'himaize', 'inulin', 'RS1', 'RS2', 'psyllium', 'both')
+for(i in 1:length(starch)){
+  subjects <- unique(butyrateData$subject[butyrateData$substrate==starch[i]])
+  bef <- but[subjects, 'butBefore']
+  dur <- but[subjects, 'butDuring']
+  p <- wilcox.test(bef,dur, paired=T, alternative='less')$p.value
+  boxplot(bef, at=i*2+0.2, add=T, col='chartreuse4')
+  boxplot(dur, at=i*2+0.8, add=T, col='royalblue1')
+  text(i*2+0.5, 42, labels=sprintf('p=%.1g', p))
+}
+axis(1, at=seq(2.5,length(starch)*2+1,2), labels=starch)
+
+
+par(mar=c(3,3.5,0.5,0.5), mgp=c(2,0.5,0))
+plot(0, type='n', ylim=c(-15,30), xlim=c(0.5,length(starch)+0.5), xaxt='n', ylab='change in butyrate (mmol/kg)', xlab='Substrate')
+starch <- c('arabino', 'himaize', 'inulin', 'RS1', 'RS2', 'psyllium', 'both')
+for(i in 1:length(starch)){
+  subjects <- unique(butyrateData$subject[butyrateData$substrate==starch[i]])
+  bef <- but[subjects, 'butBefore']
+  dur <- but[subjects, 'butDuring']
+  boxplot(dur-bef, at=i, add=T)
+  abline(h=0, lty=3)
+}
+axis(1, at=seq(1,length(starch)), labels=starch)
+dev.off()
+```
+
+
+
+```{r otu_corr_but, echo=F, warning=F, message=F}
+allData <- merge(butyrateData,shared, by.x="row.names", by.y='Group')
+allData <- allData[,-c(1,6,7,8)]
+allData <- na.omit(allData)
+indData <- ddply(allData, c('subject','status','substrate'), function(x){apply(x[,4:ncol(x)],2,mean)})
+
+
+corrBut <- indData[,c('butyrate',colnames(indData)[grep('Otu[0-9]',colnames(indData))])]
+corrBut <- na.omit(corrBut)
+
+#rf<-randomForest(butyrate~., data=corrBut)
+```
+
+```{r kmeans, echo=F, warning=F, message=F}
+plot(but$butBefore, but$butDuring, ylim=c(0,40), xlim=c(0,30))
+
+kbut <- na.omit(but[,c(2,3)])
+km<-kmeans(kbut,3)
+```
+
+```{r individuals_anosim, echo=F, warning=F, message=F}
+
+anp <- c()
+anr <- c()
+subs <- c()
+subj <- c()
+c<-1
+for(x in unique(allData$subject)){
+  dat <- allData[allData$subject==x,]
+  if(length(unique(dat$status))>1){
+    an <- anosim(dat[,5:ncol(dat)], grouping=dat$status, distance='bray')
+    subj[c] <- x
+    anr[c] <- an$statistic
+    anp[c] <- an$signif
+    subs[c] <- as.character(dat$substrate[1])
+    c<-c+1
+  }
+}
+
+anRes <- data.frame(subject=subj, substrate=subs, anosimR=anr,anosimP=anp)
+
+
+prcnt <- c()
+for(i in 1:length(starch)){
+  prcnt[i] <- sprintf('(%.0f%%)', 100*sum(anp[subs==starch[i]]<0.1)/sum(subs==starch[i]))
+}
+
+pdf('anosim_boxplot.pdf', width=7, height=4)
+layout(1)
+par(mgp=c(2,0.6,0), mar=c(6,3,1,1))
+plot(0, type='n', xlim=c(0.5,7.5), ylim=c(-0.2,1), ylab='ANOSIM R', xaxt='n', xlab='', las=2)
+axis(1, at=1:7, labels=starch, line=0)
+axis(1, at=1:7, labels=prcnt, line=1, tick=F)
+axis(1, at=4, labels='Substrate\n(% p<0.1)', line=4)
+for(i in 1:length(starch)){
+  #stripchart(at=i, anr[subs==starch[i]], vertical=T, method='jitter',  pch=21, bg=c('grey80','grey30')[as.numeric(anp[subs==starch[i]]<0.05)+1], add=T)
+  boxplot(at=i, anr[subs==starch[i]], add=T, yaxt='n')
+}
+dev.off()
+```
+
+```{r adonis, echo=F, warning=F, message=F}
+
+anp <- c()
+anr <- c()
+subs <- c()
+subj <- c()
+c<-1
+for(x in starch){
+  dat <- allData[allData$substrate==x,]
+  dist <- vegdist(dat[,5:ncol(dat)], method='bray')
+    ad <- adonis(dist~status*subject, data=dat)
+    subj[c] <- x
+    anr[c] <- an$statistic
+    anp[c] <- an$signif
+    subs[c] <- as.character(dat$substrate[1])
+    c<-c+1
+}
+
+anRes <- data.frame(subject=subj, substrate=subs, anosimR=anr,anosimP=anp)
+
+
+prcnt <- c()
+for(i in 1:length(starch)){
+  prcnt[i] <- sprintf('(%.0f%%)', 100*sum(anp[subs==starch[i]]<0.1)/sum(subs==starch[i]))
+}
+
+pdf('anosim_boxplot.pdf', width=7, height=4)
+layout(1)
+par(mgp=c(2,0.6,0), mar=c(6,3,1,1))
+plot(0, type='n', xlim=c(0.5,7.5), ylim=c(-0.2,1), ylab='ANOSIM R', xaxt='n', xlab='', las=2)
+axis(1, at=1:7, labels=starch, line=0)
+axis(1, at=1:7, labels=prcnt, line=1, tick=F)
+axis(1, at=4, labels='Substrate\n(% p<0.1)', line=4)
+for(i in 1:length(starch)){
+  #stripchart(at=i, anr[subs==starch[i]], vertical=T, method='jitter',  pch=21, bg=c('grey80','grey30')[as.numeric(anp[subs==starch[i]]<0.05)+1], add=T)
+  boxplot(at=i, anr[subs==starch[i]], add=T, yaxt='n')
+}
+dev.off()
+```
